@@ -1,0 +1,10 @@
+# Local scope and credentials; never commit customer-specific values.
+scope.json
+.env
+.env.*
+*.token
+
+# Local execution artifacts and Python cache.
+runs/
+__pycache__/
+*.py[cod]

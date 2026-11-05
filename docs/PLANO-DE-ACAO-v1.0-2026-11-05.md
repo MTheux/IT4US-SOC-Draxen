@@ -2,7 +2,13 @@
 
 **Versão:** 1.0  
 **Data:** 2026-11-05  
-**Estado:** Proposta para priorização; nenhuma integração ou coleta foi executada.
+**Estado:** MVP CLI implementado e demonstração sintética executada. Consulta real Censys ainda depende de token, entitlement e escopo aprovado.
+
+## Estado de implementação
+
+- **Disponível:** CLI local em `soc_easm.py`; geração de modelo de escopo; validação de gates; modo demo sem rede; coletor Censys passivo opt-in; CSV/JSON/Markdown para triagem.
+- **Pendente:** credencial e entitlement Censys da IT4US; seed e autorização do projeto-piloto; primeira consulta real supervisionada; alertas, agendamento e dashboard cliente.
+- **Limite:** o MVP não executa scan ativo nem valida vulnerabilidades. A instalação mencionada pelo Fabio precisa de definição separada de fornecedor, sistema operacional e perfil de scan autorizado.
 
 ## 1. Resultado esperado
 
@@ -49,7 +55,7 @@ O primeiro corte usa Censys para descoberta e enriquecimento passivos. A valida�
 
 **Ações**
 
-1. Criar um adaptador Censys de leitura, com credenciais guardadas fora do código e dos logs.
+1. Integrar o adaptador Censys de leitura já implementado, com credenciais guardadas fora do código e dos logs.
 2. Consultar apenas seeds do piloto que estejam documentados como autorizados.
 3. Persistir resposta mínima, identificador do provedor, timestamp da consulta/observação, query, licença/entitlement e hash da evidência original.
 4. Normalizar hosts, FQDNs, web properties, certificados, serviços e relações.

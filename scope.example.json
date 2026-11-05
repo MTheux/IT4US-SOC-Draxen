@@ -1,0 +1,16 @@
+{
+  "project_id": "demo-synthetic",
+  "client_label": "Ambiente de demonstração — dados sintéticos",
+  "authorization": {
+    "status": "pending",
+    "reference": "[referência da autorização aprovada]",
+    "approved_by": "[responsável aprovador]",
+    "valid_from": "AAAA-MM-DD",
+    "valid_until": "AAAA-MM-DD",
+    "allowed_actions": []
+  },
+  "authorized_seeds": [
+    "example.org"
+  ],
+  "excluded_seeds": []
+}
