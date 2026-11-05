@@ -3,8 +3,13 @@ scope.json
 .env
 .env.*
 *.token
+!.env.example
 
 # Local execution artifacts and Python cache.
 runs/
 __pycache__/
 *.py[cod]
+
+# Local web application data
+.venv/
+data/

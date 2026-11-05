@@ -1,0 +1,25 @@
+services:
+  it4us-soc-easm:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${EASM_PORT:-8765}:8765"
+    environment:
+      EASM_DB_PATH: /data/easm.sqlite
+      EASM_COOKIE_SECURE: ${EASM_COOKIE_SECURE:-0}
+      EASM_BOOTSTRAP_EMAIL: ${EASM_BOOTSTRAP_EMAIL:?configure EASM_BOOTSTRAP_EMAIL in .env}
+      EASM_BOOTSTRAP_PASSWORD: ${EASM_BOOTSTRAP_PASSWORD:?configure EASM_BOOTSTRAP_PASSWORD in .env}
+      CENSYS_API_TOKEN: ${CENSYS_API_TOKEN:-}
+    volumes:
+      - easm-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+
+volumes:
+  easm-data:

@@ -2,7 +2,7 @@
 
 **Versão:** 1.0  
 **Data:** 2026-11-05  
-**Estado:** especificação de produto; nenhuma interface foi construída.
+**Estado:** interface web v1.0 implementada para overview, inventário, exposições compartilhadas, mudanças, relatórios e troca de projeto. Funciona com dados sintéticos; validação de acesso de cliente e conteúdo em um piloto seguem pendentes.
 
 ## Objetivo da tela
 
@@ -10,7 +10,7 @@ Permitir que o cliente entenda, em poucos minutos, quais ativos externos estão 
 
 ## Página inicial do projeto
 
-### Resumo superior
+### Resumo superior — implementado
 
 - **Ativos acompanhados:** contagem com link para inventário.
 - **Novos desde o último período:** contagem de candidatos, separando candidatos ainda não revisados.
@@ -18,7 +18,7 @@ Permitir que o cliente entenda, em poucos minutos, quais ativos externos estão 
 - **Ações concluídas:** decisões e correções registradas pelo SOC/cliente.
 - **Última atualização:** data/hora e fonte; sinalizar atraso na coleta.
 
-### Mudanças recentes
+### Mudanças recentes — implementado
 
 Lista cronológica: hostname/ativo, tipo de mudança, quando foi observado, fonte, confiança e estado da revisão.
 
@@ -32,7 +32,7 @@ Fila resumida com título, prioridade, ativo, explicação, estado e próxima a�
 - `Descartado`: falso positivo ou fora do escopo, com razão registrada.
 - `Ação recomendada`: orientação defensiva; não implica que uma falha foi explorada.
 
-### Inventário
+### Inventário — implementado
 
 Filtros por tipo de ativo, ambiente, relação com seed, confiança, fonte e estado. Exibir relações indiretas e possível infraestrutura compartilhada, sem apresentar IP compartilhado como propriedade exclusiva.
 

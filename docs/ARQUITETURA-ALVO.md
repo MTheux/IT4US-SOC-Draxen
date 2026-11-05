@@ -2,7 +2,7 @@
 
 **Versão:** 1.0  
 **Data:** 2026-11-05  
-**Estado:** proposta; sem serviços implantados.
+**Estado:** aplicação web single-node implementada em FastAPI/SQLite, mais CLI passivo. O diagrama mostra o fluxo atual e capacidades futuras; não representa implantação corporativa.
 
 ## Fluxo
 

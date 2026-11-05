@@ -32,6 +32,17 @@ CSV_FIELDS = [
 ]
 
 
+def censys_api_token() -> str:
+    """Read the provider credential from the environment or a mounted secret file."""
+    secret_path = os.environ.get("CENSYS_API_TOKEN_FILE", "").strip()
+    if secret_path:
+        try:
+            return Path(secret_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    return os.environ.get("CENSYS_API_TOKEN", "").strip()
+
+
 class ScopeError(ValueError):
     pass
 
@@ -254,7 +265,7 @@ def normalize_hit(hit: dict[str, Any], seed: str, project_id: str, observed_at: 
 
 
 def collect_censys(scope: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    token = os.environ.get("CENSYS_API_TOKEN", "").strip()
+    token = censys_api_token()
     if not token:
         raise ScopeError("Defina CENSYS_API_TOKEN no ambiente seguro antes da coleta real.")
     org_id = os.environ.get("CENSYS_ORGANIZATION_ID", "").strip() or None

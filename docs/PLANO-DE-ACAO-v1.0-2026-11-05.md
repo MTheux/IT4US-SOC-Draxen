@@ -2,12 +2,12 @@
 
 **Versão:** 1.0  
 **Data:** 2026-11-05  
-**Estado:** MVP CLI implementado e demonstração sintética executada. Consulta real Censys ainda depende de token, entitlement e escopo aprovado.
+**Estado:** console web self-hosted e CLI implementados; demonstração sintética executada e interface revisada no navegador. Consulta real Censys ainda depende de token, entitlement e escopo aprovado. Pronto para revisão técnica e piloto controlado; não declarar produção.
 
 ## Estado de implementação
 
-- **Disponível:** CLI local em `soc_easm.py`; geração de modelo de escopo; validação de gates; modo demo sem rede; coletor Censys passivo opt-in; CSV/JSON/Markdown para triagem.
-- **Pendente:** credencial e entitlement Censys da IT4US; seed e autorização do projeto-piloto; primeira consulta real supervisionada; alertas, agendamento e dashboard cliente.
+- **Disponível:** console web SOC com projetos isolados, cadastro de cliente, aprovação independente, validade/exclusões, controles de coleta, inventário, candidatos de exposição, triagem, mudanças, histórico, usuários/papéis, auditoria e exports CSV/Markdown; projeto demo sintético; CLI e coletor Censys passivo opt-in; instalação local e Compose.
+- **Pendente para o piloto:** credencial e entitlement Censys da IT4US; seed e autorização do projeto-piloto; primeira consulta real supervisionada; integração SSO/MFA; verificação formal do isolamento entre tenants; política de retenção, backup/restore e operação atrás do proxy corporativo.
 - **Limite:** o MVP não executa scan ativo nem valida vulnerabilidades. A instalação mencionada pelo Fabio precisa de definição separada de fornecedor, sistema operacional e perfil de scan autorizado.
 
 ## 1. Resultado esperado
@@ -26,8 +26,8 @@ O primeiro corte usa Censys para descoberta e enriquecimento passivos. A valida�
 - Normalização, deduplicação e associação de ativos com proveniência e confiança.
 - Histórico de observações e mudanças: ativo novo/desaparecido, serviço/porta alterado, certificado novo/próximo de expirar e mudança de banner ou tecnologia.
 - Triagem SOC com estado, responsável, prioridade, evidência, decisão e justificativa.
-- Dashboard interno e resumo por projeto destinado ao cliente, com isolamento por tenant.
-- Exportação sanitizada em CSV/JSON/PDF após revisão humana.
+- Dashboard interno e visão por projeto destinada ao cliente, com isolamento de acesso por tenant/projeto.
+- Exportação de inventário CSV e resumo Markdown; revisar manualmente antes de compartilhar.
 
 ### Fora do primeiro release
 
