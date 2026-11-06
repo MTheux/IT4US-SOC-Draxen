@@ -8,18 +8,53 @@ Entregar ao Fabio e ao time SOC um console para cadastrar clientes e escopos, ob
 
 Este repositório contém somente a proposta e os artefatos próprios deste produto. Não contém código, dados, credenciais, configurações nem documentação interna do Draxen.
 
-## Console web — macOS/Linux
+## Instalação no Mac do SOC
 
-Requer Python 3.10+.
+Pré-requisitos: macOS, Python 3.10 ou superior, Git e acesso do GitHub à organização/repositório privado `MTheux/IT4US-SOC-Draxen`. Confira as ferramentas:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python scripts/run_local.py
+python3 --version
+git --version
 ```
 
-A primeira execução solicita email e senha do administrador SOC; a senha é armazenada como hash. O serviço fica em `http://127.0.0.1:8765` e usa SQLite local em `data/easm.sqlite`. Projeto demonstrativo e dados sintéticos são incluídos automaticamente. Não há chamadas externas no modo demonstração.
+No Terminal, clone o projeto e instale as dependências em um ambiente Python isolado:
+
+```bash
+git clone https://github.com/MTheux/IT4US-SOC-Draxen.git
+cd IT4US-SOC-Draxen
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+python3 scripts/run_local.py
+```
+
+Na primeira inicialização, informe o email do administrador SOC e crie uma senha com pelo menos 14 caracteres quando o Terminal solicitar. A senha é armazenada como hash. Depois abra **http://127.0.0.1:8765** no navegador e entre com essa conta. O serviço escuta somente no próprio Mac; os dados locais ficam em `data/easm.sqlite`.
+
+O primeiro login já inclui um projeto demonstrativo com dados sintéticos; testar essa demonstração não faz chamadas externas. Para parar o serviço, volte ao Terminal onde ele está rodando e pressione `Ctrl+C`.
+
+### Iniciar novamente
+
+Depois da instalação, não precisa clonar ou instalar de novo. No Terminal:
+
+```bash
+cd IT4US-SOC-Draxen
+source .venv/bin/activate
+python3 scripts/run_local.py
+```
+
+### OpenCode e Censys
+
+O time pode abrir o repositório no OpenCode para trabalhar no projeto, mas o token Censys deve ser disponibilizado ao processo do EASM pelo mecanismo aprovado pela IT4US. Não cole o token no chat nem o salve no Git ou em `opencode.json`. Se o secret manager disponibilizar um arquivo protegido fora do repositório, configure apenas o caminho antes de iniciar o serviço:
+
+```bash
+export CENSYS_API_TOKEN_FILE="$HOME/.config/it4us-easm/censys.token"
+python3 scripts/run_local.py
+```
+
+Peça ao administrador SOC que configure o arquivo e as permissões. Com o token ausente, o projeto de demonstração continua disponível, mas consultas reais ficam indisponíveis. Uma coleta real só deve ser iniciada na interface após cadastrar autorização vigente e receber aprovação independente do escopo. OpenCode não substitui essa aprovação.
+
+Para detalhes de implantação compartilhada, veja [Docker Compose](#implantação-com-docker-compose) e [Instalação e operação](docs/EXECUCAO-DO-AGENTE.md).
 
 ## Implantação com Docker Compose
 
