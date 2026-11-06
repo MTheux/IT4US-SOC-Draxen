@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import requests
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from .database import connect, db, initialize, utc_now
 from .security import new_session_values, token_hash, verify_password
+from .cve_enrichment import MAX_TARGETS_PER_RUN, lookup_nvd, normalize_key, software_targets
 from soc_easm import ScopeError, censys_api_token, collect_censys, collect_demo, in_domain_scope
 
 
@@ -203,6 +205,96 @@ def _api_scope(project: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _target_key(target: dict[str, str]) -> tuple[str, str]:
+    return (normalize_key(target["product"]), target["version"].strip().lower().lstrip("v"))
+
+
+def _enrich_nvd(observations: list[dict[str, Any]]) -> tuple[dict[tuple[str, str], list[dict[str, Any]]], dict[str, Any]]:
+    targets = software_targets(observations)
+    results: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    summary: dict[str, Any] = {
+        "source": "NVD CVE API 2.0", "status": "complete", "software_versions_seen": len(targets),
+        "queried": 0, "cache_hits": 0, "candidates": 0, "deferred": 0, "errors": 0,
+    }
+    if not targets:
+        summary.update(status="no_version_data", notice="Nenhum produto/versão real foi observado; nenhuma consulta NVD foi feita.")
+        return results, summary
+
+    for target in targets:
+        product_key, version_key = _target_key(target)
+        cached: list[dict[str, Any]] | None = None
+        with db() as conn:
+            row = conn.execute(
+                "SELECT fetched_at,candidates_json FROM nvd_cache WHERE product_key=? AND version_key=?",
+                (product_key, version_key),
+            ).fetchone()
+        if row:
+            try:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(row["fetched_at"])
+                if age < timedelta(hours=24):
+                    cached = json_value(row["candidates_json"], [])
+            except (TypeError, ValueError):
+                cached = None
+        if cached is not None:
+            results[(product_key, version_key)] = cached
+            summary["cache_hits"] += 1
+            continue
+        if summary["queried"] >= MAX_TARGETS_PER_RUN:
+            summary["deferred"] += 1
+            continue
+        try:
+            candidates = lookup_nvd(target["product"], target["version"])
+        except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
+            summary["errors"] += 1
+            continue
+        fetched_at = utc_now()
+        with db() as conn:
+            conn.execute(
+                "INSERT INTO nvd_cache(product_key,version_key,fetched_at,candidates_json) VALUES(?,?,?,?) "
+                "ON CONFLICT(product_key,version_key) DO UPDATE SET fetched_at=excluded.fetched_at,candidates_json=excluded.candidates_json",
+                (product_key, version_key, fetched_at, json.dumps(candidates, ensure_ascii=False)),
+            )
+        results[(product_key, version_key)] = candidates
+        summary["queried"] += 1
+    summary["candidates"] = len({candidate["cve_id"] for rows in results.values() for candidate in rows})
+    if summary["errors"] or summary["deferred"]:
+        summary["status"] = "partial"
+        summary["notice"] = "Algumas versões ficaram sem consulta nesta execução; consulte o histórico e execute novamente para completar."
+    elif summary["queried"] == 0 and summary["cache_hits"] == 0:
+        summary["status"] = "unavailable"
+        summary["notice"] = "A consulta ao NVD não foi concluída. A coleta de ativos continuou normalmente."
+    else:
+        summary["notice"] = "Correspondências NVD são candidatas e exigem validação do SOC no ativo e na configuração."
+    return results, summary
+
+
+def _upsert_cve_candidate(conn: sqlite3.Connection, project: sqlite3.Row, asset_id: str, scan_id: str,
+                          candidate: dict[str, Any]) -> str:
+    cvss_severity = candidate.get("cvss_severity", "info")
+    if cvss_severity not in {"critical", "high", "medium", "low", "info"}:
+        cvss_severity = "info"
+    product_key = normalize_key(str(candidate.get("product", "")))
+    version_key = normalize_key(str(candidate.get("version", "")))
+    signal_key = f"cve:{candidate['cve_id']}:{asset_id}:{product_key}:{version_key}"
+    title = f"{candidate['cve_id']} · {candidate.get('product', 'software')} {candidate.get('version', '')}"
+    description = str(candidate.get("description", "")) or "NVD indica uma possível correspondência entre produto/versão e critérios CPE afetados."
+    evidence = {**candidate, "scan_id": scan_id, "match_status": "candidate_requires_soc_validation"}
+    evidence_json = json.dumps(evidence, ensure_ascii=False, sort_keys=True)
+    now = utc_now()
+    existing = conn.execute("SELECT id FROM findings WHERE project_id=? AND signal_key=?", (project["id"], signal_key)).fetchone()
+    if existing:
+        conn.execute("UPDATE findings SET last_seen=?,evidence_json=?,description=?,severity=? WHERE id=?",
+                     (now, evidence_json, description, cvss_severity, existing["id"]))
+    else:
+        conn.execute(
+            """INSERT INTO findings(id,tenant_id,project_id,asset_id,signal_key,title,description,severity,state,
+               source,first_seen,last_seen,evidence_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("fnd_" + uuid.uuid4().hex, project["tenant_id"], project["id"], asset_id, signal_key,
+             title, description, cvss_severity, "new", "NVD CVE API 2.0", now, now, evidence_json),
+        )
+    return signal_key
+
+
 def _upsert_observation(conn: sqlite3.Connection, project: sqlite3.Row, scan_id: str, row: dict[str, Any]) -> tuple[str, bool]:
     retrieved_at = utc_now()
     names = [n.strip().lower().rstrip(".") for n in str(row.get("hostname", "")).split(",") if n.strip()]
@@ -216,7 +308,8 @@ def _upsert_observation(conn: sqlite3.Connection, project: sqlite3.Row, scan_id:
     detail = {"hostnames": names, "ports": [], "services": [], "software": [], "provider": "Censys Platform"}
     if asset:
         detail = json_value(asset["details_json"], detail)
-    service = {"port": row.get("port"), "protocol": row.get("protocol"), "transport": row.get("transport"), "software": row.get("software")}
+    service = {"port": row.get("port"), "protocol": row.get("protocol"), "transport": row.get("transport"),
+               "software": row.get("software"), "software_details": row.get("software_details", [])}
     if service not in detail["services"]:
         detail["services"].append(service)
     try:
@@ -284,6 +377,12 @@ def run_scan(scan_id: str) -> None:
     try:
         if scan["mode"] == "demo":
             observations, query_log = collect_demo(_api_scope(project))
+            cve_results: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            cve_summary = {
+                "source": "NVD CVE API 2.0", "status": "synthetic_demo", "software_versions_seen": 0,
+                "queried": 0, "cache_hits": 0, "candidates": 0, "deferred": 0, "errors": 0,
+                "notice": "A demonstração usa software/versões sintéticos; nenhuma consulta externa foi feita.",
+            }
         else:
             scope = _api_scope(project)
             if scope["authorization"]["status"] != "approved" or "passive_censys_lookup" not in scope["authorization"]["allowed_actions"]:
@@ -292,7 +391,9 @@ def run_scan(scan_id: str) -> None:
             if date.fromisoformat(scope["authorization"]["valid_from"]) > today or date.fromisoformat(scope["authorization"]["valid_until"]) < today:
                 raise ScopeError("Consulta real bloqueada: autorização fora da validade.")
             observations, query_log = collect_censys(scope)
+            cve_results, cve_summary = _enrich_nvd(observations)
         asset_ids: set[str] = set()
+        cve_keys: set[str] = set()
         new_count = 0
         with db() as conn:
             current_project = conn.execute("SELECT * FROM projects WHERE id=?", (project["id"],)).fetchone()
@@ -301,9 +402,15 @@ def run_scan(scan_id: str) -> None:
                 if asset_id:
                     asset_ids.add(asset_id)
                     new_count += int(is_new)
+                    for target in item.get("software_details", []):
+                        if not isinstance(target, dict) or not target.get("product") or not target.get("version"):
+                            continue
+                        for candidate in cve_results.get(_target_key(target), []):
+                            cve_keys.add(_upsert_cve_candidate(conn, current_project, asset_id, scan_id, candidate))
             count_findings = conn.execute("SELECT COUNT(*) FROM findings WHERE project_id=? AND state NOT IN ('resolved','false_positive')", (project["id"],)).fetchone()[0]
             result = {"source": scan["mode"], "queries": query_log, "new_assets": new_count, "observations": len(observations),
-                      "notice": "Provider records are observations. Review ownership and exposure before customer reporting."}
+                      "notice": "Provider records are observations. Review ownership and exposure before customer reporting.",
+                      "cve_enrichment": {**cve_summary, "candidates": len(cve_keys)}}
             conn.execute("UPDATE scans SET status='completed',completed_at=?,asset_count=?,candidate_count=?,result_json=? WHERE id=?",
                          (utc_now(), len(asset_ids), count_findings, json.dumps(result), scan_id))
             if project["mode"] == "censys" and project["scan_interval_hours"]:
@@ -603,8 +710,9 @@ def overview(project_id: Optional[str] = None, user: dict[str, Any] = Depends(ge
         recent = conn.execute(
             """SELECT f.*,a.primary_name asset_name FROM findings f LEFT JOIN assets a ON a.id=f.asset_id
                WHERE f.project_id=? AND f.tenant_id=? AND f.state NOT IN ('resolved','false_positive')
+               AND (?=0 OR f.signal_key NOT LIKE 'cve:%' OR f.state='accepted')
                ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
-               f.last_seen DESC LIMIT 6""", (project["id"], tenant_id)
+               f.last_seen DESC LIMIT 6""", (project["id"], tenant_id, int(user["role"] == "client_viewer"))
         ).fetchall()
         trend = conn.execute(
             """SELECT substr(first_seen,1,10) day,COUNT(*) n FROM assets WHERE project_id=? AND tenant_id=?
@@ -686,7 +794,7 @@ def findings(project_id: str, severity: str = "", state: str = "", user: dict[st
                   LEFT JOIN assets a ON a.id=f.asset_id WHERE f.project_id=? AND f.tenant_id=?"""
         params: list[Any] = [project_id,project["tenant_id"]]
         if user["role"] == "client_viewer":
-            query += " AND f.state NOT IN ('false_positive')"
+            query += " AND f.state NOT IN ('false_positive') AND (f.signal_key NOT LIKE 'cve:%' OR f.state='accepted')"
         if severity:
             query += " AND f.severity=?"
             params.append(severity)
@@ -703,6 +811,35 @@ def findings(project_id: str, severity: str = "", state: str = "", user: dict[st
             if user["role"] != "client_viewer": item["analyst_note"]=r["analyst_note"]
             output.append(item)
         return output
+
+
+@app.get("/api/cve-matches")
+def cve_matches(project_id: str, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    with db() as conn:
+        project = project_row(conn, user, project_id)
+        query = """SELECT f.*,a.primary_name asset_name,a.ip asset_ip FROM findings f
+                   LEFT JOIN assets a ON a.id=f.asset_id WHERE f.project_id=? AND f.tenant_id=?
+                   AND f.signal_key LIKE 'cve:%'"""
+        params: list[Any] = [project_id, project["tenant_id"]]
+        if user["role"] == "client_viewer":
+            query += " AND f.state='accepted'"
+        query += " ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,f.last_seen DESC LIMIT 500"
+        rows = conn.execute(query, params).fetchall()
+        latest = conn.execute("SELECT result_json FROM scans WHERE project_id=? ORDER BY COALESCE(completed_at,started_at) DESC LIMIT 1", (project_id,)).fetchone()
+        latest_result = json_value(latest["result_json"], {}) if latest else {}
+        enrichment = latest_result.get("cve_enrichment", {})
+        if user["role"] == "client_viewer":
+            enrichment = {"status": "soc_reviewed", "notice": "Correspondências CVE são revisadas pelo SOC antes de serem compartilhadas."}
+        items = []
+        for row in rows:
+            evidence = json_value(row["evidence_json"], {})
+            items.append({
+                "id": row["id"], "title": row["title"], "description": row["description"],
+                "severity": row["severity"], "state": row["state"], "asset_name": row["asset_name"],
+                "asset_ip": row["asset_ip"], "first_seen": row["first_seen"], "last_seen": row["last_seen"],
+                "evidence": evidence,
+            })
+        return {"items": items, "latest_enrichment": enrichment}
 
 
 @app.patch("/api/findings/{finding_id}")
@@ -748,7 +885,7 @@ def report_summary(project_id: str, format: str = "csv", user: dict[str, Any] = 
         project=project_row(conn,user,project_id)
         customer=user["role"]=="client_viewer"
         assets_rows=conn.execute("SELECT * FROM assets WHERE project_id=? AND tenant_id=? ORDER BY primary_name",(project_id,project["tenant_id"])).fetchall()
-        finding_query="SELECT * FROM findings WHERE project_id=? AND tenant_id=?" + (" AND state!='false_positive'" if customer else "") + " ORDER BY severity,last_seen DESC"
+        finding_query="SELECT * FROM findings WHERE project_id=? AND tenant_id=?" + (" AND state!='false_positive' AND (signal_key NOT LIKE 'cve:%' OR state='accepted')" if customer else "") + " ORDER BY severity,last_seen DESC"
         findings_rows=conn.execute(finding_query,(project_id,project["tenant_id"])).fetchall()
         project_data=serialize_project(project,customer=customer)
     if format=="csv":

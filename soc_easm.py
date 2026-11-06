@@ -28,7 +28,7 @@ TIMEOUT_SECONDS = 20
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", re.I)
 CSV_FIELDS = [
     "project_id", "seed", "hostname", "ip", "port", "protocol", "transport",
-    "software", "source", "observed_at", "confidence", "status", "evidence_sha256",
+    "software", "software_details", "source", "observed_at", "confidence", "status", "evidence_sha256",
 ]
 
 
@@ -207,6 +207,7 @@ def extract_services(hit: dict[str, Any], resource: dict[str, Any]) -> list[dict
             continue
         software = item.get("software", [])
         software_names: list[str] = []
+        software_details: list[dict[str, str]] = []
         if isinstance(software, list):
             for entry in software:
                 if isinstance(entry, dict):
@@ -214,11 +215,13 @@ def extract_services(hit: dict[str, Any], resource: dict[str, Any]) -> list[dict
                     version = entry.get("version")
                     if isinstance(product, str):
                         software_names.append(product + (f" {version}" if isinstance(version, str) and version else ""))
+                        software_details.append({"product": product, "version": version if isinstance(version, str) else ""})
         output.append({
             "port": item.get("port"),
             "protocol": item.get("protocol"),
             "transport": item.get("transport_protocol"),
             "software": ", ".join(sorted(set(software_names))),
+            "software_details": software_details,
         })
     return output or [{}]
 
@@ -255,6 +258,7 @@ def normalize_hit(hit: dict[str, Any], seed: str, project_id: str, observed_at: 
             "protocol": service.get("protocol", ""),
             "transport": service.get("transport", ""),
             "software": service.get("software", ""),
+            "software_details": service.get("software_details", []),
             "source": "censys-platform-search",
             "observed_at": observed_at,
             "confidence": "candidate",
@@ -337,7 +341,7 @@ def write_run(out_root: Path, scope: dict[str, Any], source: str, observations: 
     with (run_dir / "assets.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
         writer.writeheader()
-        writer.writerows(observations)
+    writer.writerows({**item, "software_details": json.dumps(item.get("software_details", []), ensure_ascii=False)} for item in observations)
     summary = [
         f"# EASM — {scope['project_id']}",
         "",

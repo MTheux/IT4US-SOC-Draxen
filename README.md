@@ -89,7 +89,17 @@ python scripts/run_local.py
 
 Não abra nem imprima o arquivo pelo OpenCode, não cole o valor do token no chat e não peça ao modelo para executar `env`, `printenv`, `cat` ou comandos equivalentes. Os analistas operam a coleta pela interface EASM, após a aprovação do escopo; OpenCode não substitui esse gate. Para Compose, o administrador injeta `CENSYS_API_TOKEN` no ambiente protegido do serviço a partir do secret manager; não grave o valor no `.env` ou no Git.
 
-Este é EASM de inventário e priorização por observação externa, não um scanner ativo nem verificador de vulnerabilidades. Sinais de exposição são candidatos para investigação e não confirmam propriedade ou falha explorável.
+Este é EASM de inventário e priorização por observação externa, não um scanner ativo nem verificador de vulnerabilidades. No console web, uma coleta Censys pode enriquecer produtos/versões observados com correspondências candidatas do NVD e CVSS 3.1; isso não comprova que o ativo esteja vulnerável.
+
+## Correlação de CVEs no console web
+
+Após uma coleta Censys concluída pela interface, o console consulta o NVD CVE API 2.0 usando somente o nome do produto e a versão observada. Não envia hostname, IP, seed, cliente ou escopo para o NVD. O processamento exige correspondência do produto e da versão com critérios CPE do registro, e exibe apenas CVEs com CVSS 3.1 disponível. O score mostrado é o Base Score publicado pelo NVD.
+
+Os resultados aparecem em **CVE matches** e também na fila de exposição, sempre como candidatos para validação do SOC. O analista deve confirmar fabricante, versão realmente instalada, configuração e aplicabilidade antes de classificar o ativo como vulnerável; clientes só veem uma correspondência CVE depois que o SOC a aceita. Se não houver versão observada, CVSS 3.1 ou correspondência CPE, nenhum candidato é criado. A demonstração sintética não consulta serviços externos nem produz CVEs.
+
+Por proteção da disponibilidade do NVD, cada execução consulta até 10 combinações de produto/versão ainda não presentes no cache de 24 horas; o restante fica indicado como parcial para uma próxima execução. Uma indisponibilidade NVD não invalida a coleta de ativos. `NVD_API_KEY` é opcional e, se usado, deve ser injetado pelo secret manager no processo do serviço.
+
+Essa correlação é heurística e não substitui validação do fornecedor, scanner autenticado ou análise de configuração. O CLI legado continua gerando observações e inventário; a fila CVE 3.1 está no console web.
 
 ## CLI passiva — modo demonstração
 

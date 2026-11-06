@@ -89,6 +89,12 @@ Cada execução grava:
 
 Analista deve confirmar associação, relevância, criticidade e próxima ação antes de tratar um item como finding ou compartilhar com cliente. A ausência de resultados não prova ausência de ativo ou risco. O console web oferece dashboard, agendamento passivo, papéis e isolamento por projeto; validação formal de isolamento entre tenants, SSO/MFA, DAST e varredura ativa não fazem parte deste release.
 
+### Correlação CVE 3.1 no console web
+
+Ao concluir uma consulta passiva Censys pela interface, o serviço pode consultar o NVD CVE API 2.0 por produto e versão de software observados. A solicitação envia somente esses dois campos, sem hostname, IP ou seed. O painel guarda correspondências que também correspondam ao produto/versão nos critérios CPE e tenham CVSS 3.1 publicado. Até o SOC revisar o fabricante, a versão instalada e a configuração, o registro permanece como candidato; cliente só recebe itens que o SOC marcou como aceitos.
+
+O NVD tem cache local por 24 horas e limite de 10 novas combinações produto/versão por execução. Execuções parciais informam quantos itens ficaram para depois; falha do NVD não cancela a coleta Censys. O modo demo não consulta o NVD. Não habilite a saída do serviço para o NVD sem autorização da política de dados da IT4US. Uma CVE correlacionada não é confirmação de vulnerabilidade, e a integração não envia tráfego aos ativos observados.
+
 ## Controles antes de instalar na estação do Fabio
 
 1. Confirmar com Fabio qual sistema operacional e política de software da estação.

@@ -118,6 +118,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS nvd_cache (
+  product_key TEXT NOT NULL, version_key TEXT NOT NULL, fetched_at TEXT NOT NULL,
+  candidates_json TEXT NOT NULL, PRIMARY KEY(product_key,version_key)
+);
 CREATE INDEX IF NOT EXISTS idx_assets_project_seen ON assets(project_id,last_seen);
 CREATE INDEX IF NOT EXISTS idx_findings_project_state ON findings(project_id,state,severity);
 CREATE INDEX IF NOT EXISTS idx_scans_project_started ON scans(project_id,started_at);
