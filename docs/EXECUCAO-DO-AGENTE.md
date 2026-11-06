@@ -1,6 +1,6 @@
 # Instalação e operação do agente EASM
 
-**Versão:** 0.1  
+**Versão:** 1.0
 **Data:** 2026-11-05  
 **Público:** Fabio e time SOC da IT4US.
 
@@ -58,11 +58,20 @@ python3 soc_easm.py validate --scope scope.json --live
 
 `validate --live` verifica autorização e validade localmente, mas não faz consultas.
 
-## 3. Configurar o acesso Censys
+## 3. Configurar Censys e OpenCode
 
 Peça ao administrador Censys para confirmar o acesso à Platform API, a role necessária, a organização/entitlement correto e limites de créditos. O MVP usa Personal Access Token via `Authorization: Bearer` e endpoint de busca v3. Opcionalmente configure `CENSYS_ORGANIZATION_ID` como variável de ambiente na máquina; não grave token ou ID da organização no arquivo de escopo.
 
-Armazene o token no gerenciador de segredos aprovado pela IT4US e injete `CENSYS_API_TOKEN` no processo. Não use um token colado em um comando, arquivo, chat ou script versionado. Depois de configurar o segredo:
+Armazene o token no gerenciador de segredos aprovado pela IT4US e injete-o no processo EASM. Para execução local, a aplicação também lê um arquivo secreto externo ao repositório:
+
+```bash
+export CENSYS_API_TOKEN_FILE="$HOME/.config/it4us-easm/censys.token"
+python scripts/run_local.py
+```
+
+O arquivo deve ser criado/disponibilizado pelo secret manager, com permissões restritas ao operador/serviço. O OpenCode pode iniciar o EASM pelo terminal, mas o token não deve ser colado na conversa, salvo em `opencode.json` como chave de modelo, impresso no terminal ou lido pelo agente. Para Compose, o administrador injeta `CENSYS_API_TOKEN` no ambiente do serviço pelo mecanismo aprovado; não grave esse valor em `.env` ou no Git. As permissões do OpenCode permitem pedir aprovação para comandos de terminal; mantenha aprovação explícita para ações que iniciem coleta real.
+
+Depois que a credencial estiver configurada no processo de serviço, a coleta CLI real é:
 
 ```bash
 python3 soc_easm.py collect --scope scope.json --source censys --live --out runs
@@ -78,7 +87,7 @@ Cada execução grava:
 - `assets.csv`: inventário para triagem/importação;
 - `summary.md`: resumo legível para operador.
 
-Analista deve confirmar associação, relevância, criticidade e próxima ação antes de tratar um item como finding ou compartilhar com cliente. A ausência de resultados não prova ausência de ativo ou risco. O MVP não fornece ainda dashboard web, agendamento contínuo, isolamento multiusuário ou DAST.
+Analista deve confirmar associação, relevância, criticidade e próxima ação antes de tratar um item como finding ou compartilhar com cliente. A ausência de resultados não prova ausência de ativo ou risco. O console web oferece dashboard, agendamento passivo, papéis e isolamento por projeto; validação formal de isolamento entre tenants, SSO/MFA, DAST e varredura ativa não fazem parte deste release.
 
 ## Controles antes de instalar na estação do Fabio
 

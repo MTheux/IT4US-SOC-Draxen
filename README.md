@@ -23,7 +23,7 @@ A primeira execução solicita email e senha do administrador SOC; a senha é ar
 
 ## Implantação com Docker Compose
 
-Copie `.env.example` para `.env`, preencha email/senha iniciais e, quando aprovado, o token Censys. Preserve `.env` fora do Git. Para o provedor, prefira `CENSYS_API_TOKEN_FILE` apontando a um arquivo montado do secret manager. No Compose de exemplo, injete `CENSYS_API_TOKEN` pelo ambiente protegido da máquina; não coloque credenciais no Git. O serviço é publicado somente em loopback (`127.0.0.1:8765`); para acesso compartilhado, coloque-o atrás do proxy HTTPS corporativo e defina `EASM_COOKIE_SECURE=1`.
+Copie `.env.example` para `.env` e preencha o email e a senha iniciais. Preserve `.env` fora do Git. Para o provedor, prefira `CENSYS_API_TOKEN_FILE` apontando a um arquivo montado do secret manager. No Compose de exemplo, injete `CENSYS_API_TOKEN` pelo ambiente protegido da máquina; não coloque credenciais no Git. O serviço é publicado somente em loopback (`127.0.0.1:8765`); para acesso compartilhado, coloque-o atrás do proxy HTTPS corporativo e defina `EASM_COOKIE_SECURE=1`.
 
 ```bash
 cp .env.example .env
@@ -40,6 +40,19 @@ Para uma instalação SOC compartilhada, configure TLS, backup cifrado do volume
 4. Analista executa ou agenda consultas passivas Censys; consultas ficam limitadas aos seeds e resultados associados a hostname autorizado.
 5. SOC revisa ativos, criticidade e candidatos de exposição, mantendo proveniência, estado e notas internas na trilha de auditoria.
 6. Cliente recebe acesso somente leitura a projetos explicitamente associados e pode baixar inventário e resumo sem notas internas.
+
+## OpenCode e token Censys
+
+OpenCode pode ajudar a manter o código e iniciar comandos do projeto, mas o token Censys deve ficar disponível ao **processo do EASM**, não ser enviado como mensagem ao modelo nem salvo em `opencode.json` como chave de provedor. A interpolação de arquivos do OpenCode é uma configuração para valores usados pela própria configuração do OpenCode; não é o secret manager do EASM. Consulte [variáveis de configuração do OpenCode](https://opencode.ai/docs/config/) e [permissões de ferramentas](https://opencode.ai/docs/permissions/).
+
+Para execução local, peça ao secret manager aprovado que disponibilize um arquivo fora deste repositório, com leitura restrita ao operador/serviço (por exemplo, modo `600`). Na mesma sessão de terminal que iniciará o EASM, configure somente o **caminho** do arquivo e inicie o serviço:
+
+```bash
+export CENSYS_API_TOKEN_FILE="$HOME/.config/it4us-easm/censys.token"
+python scripts/run_local.py
+```
+
+Não abra nem imprima o arquivo pelo OpenCode, não cole o valor do token no chat e não peça ao modelo para executar `env`, `printenv`, `cat` ou comandos equivalentes. Os analistas operam a coleta pela interface EASM, após a aprovação do escopo; OpenCode não substitui esse gate. Para Compose, o administrador injeta `CENSYS_API_TOKEN` no ambiente protegido do serviço a partir do secret manager; não grave o valor no `.env` ou no Git.
 
 Este é EASM de inventário e priorização por observação externa, não um scanner ativo nem verificador de vulnerabilidades. Sinais de exposição são candidatos para investigação e não confirmam propriedade ou falha explorável.
 
