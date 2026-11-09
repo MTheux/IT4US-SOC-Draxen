@@ -341,7 +341,7 @@ def write_run(out_root: Path, scope: dict[str, Any], source: str, observations: 
     with (run_dir / "assets.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
         writer.writeheader()
-    writer.writerows({**item, "software_details": json.dumps(item.get("software_details", []), ensure_ascii=False)} for item in observations)
+        writer.writerows({**item, "software_details": json.dumps(item.get("software_details", []), ensure_ascii=False)} for item in observations)
     summary = [
         f"# EASM — {scope['project_id']}",
         "",
