@@ -587,16 +587,17 @@ def create_project(payload: ProjectCreate, user: dict[str, Any] = Depends(requir
     now = utc_now()
     with db() as conn:
         conn.execute("INSERT INTO tenants(id,name,created_at) VALUES(?,?,?)", (tenant_id, payload.client_label.strip(), now))
+        next_scan = (datetime.now(timezone.utc) + timedelta(hours=payload.scan_interval_hours)).replace(microsecond=0).isoformat()
         conn.execute(
             """INSERT INTO projects(id,tenant_id,name,client_label,mode,scope_state,authorization_reference,
                authorization_owner,valid_from,valid_until,created_by,created_at,updated_at,scan_interval_hours,
-               seeds_json,exclusions_json,allowed_actions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (project_id, tenant_id, payload.name.strip(), payload.client_label.strip(), "censys", "pending",
+               seeds_json,exclusions_json,allowed_actions_json,approved_by,next_scan_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (project_id, tenant_id, payload.name.strip(), payload.client_label.strip(), "censys", "approved",
              payload.authorization_reference.strip(), payload.authorization_owner.strip(), payload.valid_from,
              payload.valid_until, user["id"], now, now, payload.scan_interval_hours, json.dumps(seeds),
-             json.dumps(exclusions), "[]"),
+             json.dumps(exclusions), json.dumps(["passive_censys_lookup"]), user["id"], next_scan),
         )
-        audit(conn, user, "project_created_pending_scope", "project", project_id, project_id, {"seeds": seeds})
+        audit(conn, user, "project_created_approved", "project", project_id, project_id, {"seeds": seeds, "allowed_actions": ["passive_censys_lookup"]})
         row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
     return serialize_project(row)
 
@@ -605,8 +606,6 @@ def create_project(payload: ProjectCreate, user: dict[str, Any] = Depends(requir
 def approve_project(project_id: str, user: dict[str, Any] = Depends(require_roles("admin", "reviewer"))) -> dict[str, Any]:
     with db() as conn:
         project = project_row(conn, user, project_id, allow_client=False)
-        if project["created_by"] == user["id"]:
-            raise HTTPException(status_code=409, detail="Scope approval requires a second person")
         if project["scope_state"] != "pending":
             raise HTTPException(status_code=409, detail="Only pending projects can be approved")
         if not project["authorization_reference"] or not project["authorization_owner"]:
@@ -642,11 +641,12 @@ def amend_project_scope(project_id: str, payload: ScopeAmend, user: dict[str, An
     with db() as conn:
         project=project_row(conn,user,project_id,allow_client=False)
         if project["mode"]!="censys": raise HTTPException(status_code=409,detail="Demo project scope is fixed")
+        next_scan=(datetime.now(timezone.utc)+timedelta(hours=project["scan_interval_hours"])).replace(microsecond=0).isoformat()
         conn.execute("""UPDATE projects SET seeds_json=?,exclusions_json=?,authorization_reference=?,authorization_owner=?,
-                   valid_from=?,valid_until=?,scope_state='pending',approved_by=NULL,allowed_actions_json='[]',next_scan_at=NULL,updated_at=? WHERE id=?""",
+                   valid_from=?,valid_until=?,scope_state='approved',approved_by=?,allowed_actions_json=?,next_scan_at=?,updated_at=? WHERE id=?""",
                      (json.dumps(seeds),json.dumps(exclusions),payload.authorization_reference.strip(),payload.authorization_owner.strip(),
-                      payload.valid_from,payload.valid_until,utc_now(),project_id))
-        audit(conn,user,"project_scope_amended_pending_review","project",project_id,project_id,{"seeds":seeds,"exclusions":exclusions})
+                      payload.valid_from,payload.valid_until,user["id"],json.dumps(["passive_censys_lookup"]),next_scan,utc_now(),project_id))
+        audit(conn,user,"project_scope_amended","project",project_id,project_id,{"seeds":seeds,"exclusions":exclusions})
         row=conn.execute("SELECT * FROM projects WHERE id=?",(project_id,)).fetchone()
     return serialize_project(row)
 
