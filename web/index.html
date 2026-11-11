@@ -3,31 +3,114 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0c1b2a">
+  <meta name="theme-color" content="#070a08">
   <title>IT4US SOC · EASM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <div id="login-root" class="login-shell" hidden>
-    <div class="login-brand"><span class="brand-mark">S</span><span>IT4US <b>SURFACE</b></span></div>
-    <section class="login-panel">
-      <p class="eyebrow">SOC · EXTERNAL EXPOSURE</p>
-      <h1>Entre no seu workspace</h1>
-      <p class="muted">Acompanhe ativos externos, mudanças e exposições revisadas.</p>
-      <form id="login-form" class="form-stack">
-        <label>Email<input name="email" type="email" autocomplete="username" required></label>
-        <label>Senha<input name="password" type="password" autocomplete="current-password" required></label>
-        <button class="button primary full" type="submit">Entrar no SOC</button>
-        <p id="login-error" class="form-error" role="alert"></p>
-      </form>
-      <div class="login-foot">Acesso restrito · seus projetos são isolados por permissão.</div>
-    </section>
-    <div class="login-side"><div class="login-side-art"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="orbit-core">EASM</span></div><p>Visibilidade contínua da superfície que seus clientes expõem à internet.</p><small>Observado. Correlacionado. Revisado.</small></div>
+    <aside class="proof" aria-label="IT4US SURFACE">
+      <div class="proof-grid" aria-hidden="true"></div>
+      <div class="proof-inner">
+        <img class="proof-brand" src="/static/it4us-logo.png" alt="IT4US Cyber Security">
+        <div class="proof-mid">
+          <div class="proof-kicker">IT4US SURFACE · EXTERNAL EXPOSURE</div>
+          <h1 class="proof-title">Visibilidade para agir.</h1>
+          <p class="proof-copy">Descubra ativos externos, acompanhe mudanças e revise exposições com apoio do SOC.</p>
+          <div class="proof-flow" aria-label="Fluxo da superfície">
+            <div class="proof-stage"><span class="proof-stage-number">01</span><div><strong>Ativos</strong><p>Cadastre o cliente e o escopo externo autorizado.</p></div></div>
+            <div class="proof-stage"><span class="proof-stage-number">02</span><div><strong>Coleta</strong><p>Observe a superfície exposta de forma passiva.</p></div></div>
+            <div class="proof-stage"><span class="proof-stage-number">03</span><div><strong>Exposições</strong><p>Revise serviços, portas e mudanças correlacionadas.</p></div></div>
+            <div class="proof-stage"><span class="proof-stage-number">04</span><div><strong>Relatório</strong><p>Entregue o inventário e o laudo compartilhável.</p></div></div>
+          </div>
+        </div>
+        <p class="proof-bottom">Da descoberta à decisão, com o SOC no controle.</p>
+      </div>
+    </aside>
+    <div class="access">
+      <div class="access-inner">
+        <div class="access-head">
+          <img class="access-icon" src="/static/logo.svg" alt="IT4US" width="44" height="44">
+          <div class="access-logo">IT4US SURFACE</div>
+          <div class="access-sub">Exposure Management</div>
+          <span class="access-eyebrow"><span class="access-dot"></span> Entrar na plataforma</span>
+          <p class="access-copy">Acompanhe ativos externos, mudanças e exposições revisadas.</p>
+        </div>
+        <form id="login-form" class="form-stack">
+          <label>Email<input name="email" type="email" autocomplete="username" placeholder="voce@empresa.com" required></label>
+          <label>Senha<input name="password" type="password" autocomplete="current-password" placeholder="Digite sua senha" required></label>
+          <label class="form-check" for="agree-terms">
+            <input type="checkbox" id="agree-terms" required>
+            <span>Li e concordo com os <button type="button" id="open-terms" class="terms-link">Termos de Uso</button></span>
+          </label>
+          <button class="button primary full" type="submit">Entrar</button>
+          <p id="login-error" class="form-error" role="alert"></p>
+        </form>
+        <div class="access-foot">Acesso restrito · seus projetos são isolados por permissão.</div>
+      </div>
+    </div>
+
+    <div class="modal" id="terms-modal" hidden>
+      <div class="modal-panel terms-panel" role="dialog" aria-modal="true" aria-labelledby="terms-title">
+        <div class="modal-head terms-head">
+          <span class="terms-shield" aria-hidden="true">🛡</span>
+          <div>
+            <h2 id="terms-title">Termos de Uso e Isenção de Responsabilidade — IT4US Surface</h2>
+            <p class="terms-sub">Versão v1.0 · Leia todos os termos antes de entrar na plataforma</p>
+          </div>
+          <button class="icon-button" id="terms-close" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body terms-body" id="terms-body">
+          <p class="terms-lead">Ao acessar ou usar o IT4US Surface você declara ter lido, compreendido e concordado com todos os termos abaixo. <strong>Esta é uma ferramenta de gestão passiva de superfície de ataque externa.</strong></p>
+          <section><h4><span class="terms-num">1</span> Escopo de uso autorizado</h4><p>O IT4US Surface consulta apenas dados passivos (Censys Platform) sobre ativos externos. Você só pode usá-lo sobre sistemas que possui ou para os quais detém autorização explícita e por escrito do titular, dentro do escopo aprovado. Manter a prova de autorização e permanecer dentro do escopo é sua responsabilidade.</p></section>
+          <section><h4 class="terms-danger"><span class="terms-num danger">3</span> ⚠ Condutas proibidas</h4><ul class="terms-forbidden"><li>Consultar, sondar ou inventariar qualquer ativo cujo titular não autorizou expressamente, ou exceder o escopo aprovado;</li><li>Usar a plataforma para intrusão ilegal, roubo de dados, extorsão, negação de serviço ou qualquer atividade destrutiva ou criminosa;</li><li>Remover, adulterar ou burlar avisos de licença, copyright ou segurança do software ou de sua saída.</li></ul></section>
+          <section><h4><span class="terms-num">5</span> Dados e privacidade</h4><p>O IT4US Surface é auto-hospedado e roda em loopback. Os autores não operam serviço centralizado nem coletam seus dados. Todo dado gerado permanece sob seu controle, e você responde por sua legalidade e segurança.</p></section>
+          <section><h4><span class="terms-num">6</span> Conformidade e responsabilidade legal</h4><p>Você deve cumprir por conta própria todas as leis aplicáveis de segurança cibernética, proteção de dados e crime informático. <strong>Toda responsabilidade legal decorrente de violação destes termos é exclusivamente sua, sem relação com os autores e contribuidores do software.</strong></p></section>
+          <section><h4><span class="terms-num">7</span> Isenção de garantias</h4><p>O software é fornecido "COMO ESTÁ", sem qualquer garantia expressa ou implícita. Na máxima extensão permitida por lei, os autores não respondem por qualquer perda direta ou indireta decorrente do uso ou da impossibilidade de uso do software.</p></section>
+        </div>
+        <div class="modal-actions terms-actions">
+          <p class="terms-hint" id="terms-hint">Role os termos até o fim para confirmar</p>
+          <button class="button primary" id="terms-accept" type="button" disabled>Li e aceito todos os termos</button>
+        </div>
+      </div>
+    </div>
   </div>
+
+  <script>
+    (function () {
+      var modal = document.getElementById("terms-modal");
+      var open = document.getElementById("open-terms");
+      var close = document.getElementById("terms-close");
+      var accept = document.getElementById("terms-accept");
+      var body = document.getElementById("terms-body");
+      var hint = document.getElementById("terms-hint");
+      var agree = document.getElementById("agree-terms");
+      if (!modal || !open || !agree) return;
+      var readToEnd = false;
+      function unlock() { readToEnd = true; accept.disabled = false; hint.textContent = "Você leu todos os termos"; }
+      function show() {
+        modal.hidden = false;
+        readToEnd = false; accept.disabled = true; hint.textContent = "Role os termos até o fim para confirmar";
+        if (body.scrollHeight <= body.clientHeight + 8) unlock();
+        body.scrollTop = 0;
+      }
+      function hide() { modal.hidden = true; }
+      open.addEventListener("click", show);
+      close.addEventListener("click", hide);
+      modal.addEventListener("click", function (e) { if (e.target === modal) hide(); });
+      body.addEventListener("scroll", function () {
+        if (body.scrollTop + body.clientHeight >= body.scrollHeight - 8) unlock();
+      });
+      accept.addEventListener("click", function () { agree.checked = true; hide(); });
+    })();
+  </script>
 
   <div id="app-root" class="app-shell" hidden>
     <aside class="sidebar" id="sidebar">
-      <a class="brand" href="#overview" aria-label="IT4US Surface home"><span class="brand-mark">S</span><span class="brand-type">IT4US <b>SURFACE</b><small>EXPOSURE MANAGEMENT</small></span></a>
+      <a class="brand" href="#overview" aria-label="IT4US Surface home"><img class="brand-mark" src="/static/logo.svg" alt="IT4US" width="31" height="31"><span class="brand-type">IT4US <b>SURFACE</b><small>EXPOSURE MANAGEMENT</small></span></a>
       <div class="workspace-label">WORKSPACE</div>
       <div class="workspace"><span class="workspace-dot"></span><span>Security Operations</span><span class="chevron">⌄</span></div>
       <nav id="primary-nav" aria-label="Navegação principal"></nav>
