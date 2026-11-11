@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the EASM console on loopback; ask for a bootstrap admin on first run."""
+"""Start the EASM console on loopback; load .env and bootstrap an admin on first run."""
 from __future__ import annotations
 
 import getpass
@@ -9,6 +9,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
+
+
+def load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE pairs from .env into the environment without overwriting
+    values already set in the shell. No external dependency."""
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# Plug-and-play: put CENSYS_API_TOKEN (and optional bootstrap creds) in .env once.
+load_dotenv(ROOT / ".env")
+
 os.environ.setdefault("EASM_DB_PATH", str(ROOT / "data" / "easm.sqlite"))
 os.environ.setdefault("EASM_HOST", "127.0.0.1")
 os.environ.setdefault("EASM_PORT", "8765")
@@ -21,7 +42,9 @@ if db_path.exists():
             user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     except sqlite3.Error:
         user_count = 0
-if user_count == 0:
+
+have_bootstrap = bool(os.environ.get("EASM_BOOTSTRAP_EMAIL") and os.environ.get("EASM_BOOTSTRAP_PASSWORD"))
+if user_count == 0 and not have_bootstrap:
     email = input("Email do administrador SOC: ").strip().lower()
     while True:
         password = getpass.getpass("Senha inicial (mínimo 14 caracteres): ")

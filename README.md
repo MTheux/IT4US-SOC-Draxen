@@ -26,10 +26,17 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+Abra o arquivo `.env` num editor e cole o **API Token do Censys** em `CENSYS_API_TOKEN=`. Opcionalmente, preencha `EASM_BOOTSTRAP_EMAIL` e `EASM_BOOTSTRAP_PASSWORD` (senha de 14+ caracteres) para criar o admin sem prompt. Depois inicie:
+
+```bash
+source .venv/bin/activate
 python3 scripts/run_local.py
 ```
 
-Na primeira inicialização, informe o email do administrador SOC e crie uma senha com pelo menos 14 caracteres quando o Terminal solicitar. A senha é armazenada como hash. Depois abra **http://127.0.0.1:8765** no navegador e entre com essa conta. O serviço escuta somente no próprio Mac; os dados locais ficam em `data/easm.sqlite`.
+Na primeira inicialização, se você não preencheu `EASM_BOOTSTRAP_EMAIL`/`EASM_BOOTSTRAP_PASSWORD` no `.env`, o Terminal pede o email do administrador SOC e uma senha com pelo menos 14 caracteres. A senha é armazenada como hash. Depois abra **http://127.0.0.1:8765** no navegador e entre com essa conta. O serviço escuta somente no próprio Mac; os dados locais ficam em `data/easm.sqlite`.
 
 O primeiro login já inclui um projeto demonstrativo com dados sintéticos; testar essa demonstração não faz chamadas externas. Para parar o serviço, volte ao Terminal onde ele está rodando e pressione `Ctrl+C`.
 
