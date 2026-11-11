@@ -26,6 +26,8 @@ from .database import connect, db, initialize, utc_now
 from .security import new_session_values, token_hash, verify_password
 from .cve_enrichment import MAX_TARGETS_PER_RUN, lookup_nvd, normalize_key, software_targets
 from soc_easm import ScopeError, censys_api_token, collect_censys, collect_demo, in_domain_scope
+from soc_bbot import bbot_available, collect_bbot
+from soc_hexiosec import collect_hexiosec_domains, hexiosec_ready, latest_scan_for_org, list_orgs
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,6 +37,13 @@ SESSION_HOURS = 8
 COOKIE_SECURE = os.environ.get("EASM_COOKIE_SECURE", "0") == "1"
 LOGIN_ATTEMPTS: dict[str, tuple[int, datetime]] = {}
 LOGIN_LOCK = threading.Lock()
+# Hexiosec ASM sync: imported orgs are authorized by their presence in Hexiosec
+# (the source of truth). Projects are born approved for passive discovery only.
+HEXIOSEC_VALID_DAYS = int(os.environ.get("HEXIOSEC_VALID_DAYS", "90"))
+HEXIOSEC_SCAN_INTERVAL_HOURS = int(os.environ.get("HEXIOSEC_SCAN_INTERVAL_HOURS", "24"))
+# BBOT is passive but slow on this host; keep it opt-in so sync never blocks on it.
+HEXIOSEC_AUTO_BBOT = os.environ.get("HEXIOSEC_AUTO_BBOT", "0") == "1"
+HEXIOSEC_LAST_SYNC: dict[str, Any] = {}
 SENSITIVE_PORTS = {
     21: ("FTP service observed", "high", "Confirm whether FTP is required and whether encrypted transport is enforced."),
     23: ("Telnet service observed", "high", "Confirm whether this legacy remote administration service is required."),
@@ -133,6 +142,10 @@ def get_current_user(request: Request) -> dict[str, Any]:
 
 
 def require_csrf(request: Request, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    # CSRF only protects state-changing methods. Safe methods (GET/HEAD/OPTIONS) are
+    # same-origin reads and must not require the token, or admin read views break.
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return user
     sent = request.headers.get("x-csrf-token", "")
     expected_hash = user.get("csrf_hash", "")
     if not sent or not secrets.compare_digest(token_hash(sent), expected_hash):
@@ -310,7 +323,7 @@ def _upsert_observation(conn: sqlite3.Connection, project: sqlite3.Row, scan_id:
         detail = json_value(asset["details_json"], detail)
     service = {"port": row.get("port"), "protocol": row.get("protocol"), "transport": row.get("transport"),
                "software": row.get("software"), "software_details": row.get("software_details", [])}
-    if service not in detail["services"]:
+    if any([service.get("port"), service.get("protocol"), service.get("software")]) and service not in detail["services"]:
         detail["services"].append(service)
     try:
         port = int(row.get("port"))
@@ -367,6 +380,90 @@ def _upsert_observation(conn: sqlite3.Connection, project: sqlite3.Row, scan_id:
     return asset_id, new_asset
 
 
+def hexiosec_sync(actor: dict[str, Any]) -> dict[str, Any]:
+    """Pull orgs/domains from Hexiosec ASM and sync them as authorized projects.
+
+    One tenant per Hexiosec org (multi-client isolation). Projects are created
+    ``approved`` for passive discovery only — the Hexiosec registration is the
+    authorization, so the manual approval gate is intentionally skipped. Idempotent
+    by ``hexiosec_org_id``: re-syncing updates seeds without re-pending. After a new
+    project is created an immediate passive Censys scan is queued.
+    """
+    summary: dict[str, Any] = {
+        "started_at": utc_now(), "orgs": 0, "projects_created": 0, "projects_updated": 0,
+        "domains": 0, "queued_scans": 0, "skipped": [], "error": "",
+    }
+    queued: list[str] = []
+    try:
+        orgs = list_orgs()
+        today = date.today()
+        valid_from = today.isoformat()
+        valid_until = (today + timedelta(days=HEXIOSEC_VALID_DAYS)).isoformat()
+        actions = json.dumps(["passive_censys_lookup", "passive_bbot_osint"])
+        with db() as conn:
+            for org in orgs:
+                org_id = str(org.get("id") or "").strip()
+                org_name = str(org.get("name") or org.get("label") or f"Org {org_id}").strip()
+                if not org_id:
+                    continue
+                summary["orgs"] += 1
+                try:
+                    scan_id = latest_scan_for_org(org_id)
+                    domains = collect_hexiosec_domains(org_id, scan_id) if scan_id else []
+                except Exception as exc:  # per-org failure must not abort the whole sync
+                    summary["skipped"].append({"org": org_name, "reason": str(exc)[:200]})
+                    continue
+                if not domains:
+                    summary["skipped"].append({"org": org_name, "reason": "sem domínios no scan mais recente"})
+                    continue
+                summary["domains"] += len(domains)
+                now = utc_now()
+                existing = conn.execute("SELECT * FROM projects WHERE hexiosec_org_id=?", (org_id,)).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE projects SET name=?,client_label=?,seeds_json=?,valid_until=?,updated_at=? WHERE id=?",
+                        (org_name, org_name, json.dumps(domains), valid_until, now, existing["id"]),
+                    )
+                    audit(conn, actor, "hexiosec_project_synced", "project", existing["id"], existing["id"],
+                          {"source": "hexiosec_sync", "org_id": org_id, "domains": len(domains)})
+                    summary["projects_updated"] += 1
+                else:
+                    project_id = "prj_" + uuid.uuid4().hex[:16]
+                    tenant_id = "hex_" + uuid.uuid4().hex[:16]
+                    next_scan = (datetime.now(timezone.utc) + timedelta(hours=HEXIOSEC_SCAN_INTERVAL_HOURS)).replace(microsecond=0).isoformat()
+                    conn.execute("INSERT INTO tenants(id,name,created_at) VALUES(?,?,?)", (tenant_id, org_name, now))
+                    conn.execute(
+                        """INSERT INTO projects(id,tenant_id,name,client_label,mode,scope_state,authorization_reference,
+                           authorization_owner,valid_from,valid_until,created_by,approved_by,created_at,updated_at,
+                           scan_interval_hours,next_scan_at,seeds_json,exclusions_json,allowed_actions_json,hexiosec_org_id)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (project_id, tenant_id, org_name, org_name, "censys", "approved",
+                         f"Hexiosec ASM · org {org_id}", "Hexiosec ASM", valid_from, valid_until,
+                         actor["id"], actor["id"], now, now, HEXIOSEC_SCAN_INTERVAL_HOURS, next_scan,
+                         json.dumps(domains), "[]", actions, org_id),
+                    )
+                    audit(conn, actor, "hexiosec_project_imported", "project", project_id, project_id,
+                          {"source": "hexiosec_sync", "org_id": org_id, "domains": len(domains)})
+                    summary["projects_created"] += 1
+                    project = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+                    queued.append(schedule_scan(conn, project, actor["id"], mode="censys"))
+                    if HEXIOSEC_AUTO_BBOT:
+                        queued.append(schedule_scan(conn, project, actor["id"], mode="bbot"))
+    except Exception as exc:
+        summary["error"] = str(exc)[:300]
+    # Run queued scans outside the sync transaction so each opens its own connection.
+    for scan_id in queued:
+        try:
+            run_scan(scan_id)
+        except Exception:
+            pass
+    summary["queued_scans"] = len(queued)
+    summary["finished_at"] = utc_now()
+    HEXIOSEC_LAST_SYNC.clear()
+    HEXIOSEC_LAST_SYNC.update(summary)
+    return summary
+
+
 def run_scan(scan_id: str) -> None:
     with db() as conn:
         scan = conn.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone()
@@ -382,6 +479,20 @@ def run_scan(scan_id: str) -> None:
                 "source": "NVD CVE API 2.0", "status": "synthetic_demo", "software_versions_seen": 0,
                 "queried": 0, "cache_hits": 0, "candidates": 0, "deferred": 0, "errors": 0,
                 "notice": "A demonstração usa software/versões sintéticos; nenhuma consulta externa foi feita.",
+            }
+        elif scan["mode"] == "bbot":
+            scope = _api_scope(project)
+            if scope["authorization"]["status"] != "approved" or "passive_bbot_osint" not in scope["authorization"]["allowed_actions"]:
+                raise ScopeError("Descoberta BBOT bloqueada: escopo não aprovado para passive_bbot_osint.")
+            today = date.today()
+            if date.fromisoformat(scope["authorization"]["valid_from"]) > today or date.fromisoformat(scope["authorization"]["valid_until"]) < today:
+                raise ScopeError("Descoberta BBOT bloqueada: autorização fora da validade.")
+            observations, query_log = collect_bbot(scope)
+            cve_results = {}
+            cve_summary = {
+                "source": "BBOT passivo", "status": "passive_osint", "software_versions_seen": 0,
+                "queried": 0, "cache_hits": 0, "candidates": 0, "deferred": 0, "errors": 0,
+                "notice": "Descoberta passiva BBOT (apenas OSINT, sem correlação CVE). Hosts entram como candidatos para revisão.",
             }
         else:
             scope = _api_scope(project)
@@ -424,11 +535,11 @@ def run_scan(scan_id: str) -> None:
                          (utc_now(), safe_error[:500], scan_id))
 
 
-def schedule_scan(conn: sqlite3.Connection, project: sqlite3.Row, requester_id: str | None = None) -> str:
+def schedule_scan(conn: sqlite3.Connection, project: sqlite3.Row, requester_id: str | None = None, mode: str | None = None) -> str:
     scan_id = "run_" + uuid.uuid4().hex
     conn.execute(
         "INSERT INTO scans(id,tenant_id,project_id,mode,status,requested_by) VALUES(?,?,?,?,?,?)",
-        (scan_id, project["tenant_id"], project["id"], project["mode"], "queued", requester_id),
+        (scan_id, project["tenant_id"], project["id"], mode or project["mode"], "queued", requester_id),
     )
     return scan_id
 
@@ -498,12 +609,42 @@ def health() -> dict[str, str]:
 def config_status(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     if user["role"] == "client_viewer":
         return {"censys_ready": False, "customer_view": True}
-    return {"censys_ready": bool(censys_api_token()), "censys_organization_configured": bool(os.environ.get("CENSYS_ORGANIZATION_ID"))}
+    return {
+        "censys_ready": bool(censys_api_token()),
+        "censys_organization_configured": bool(os.environ.get("CENSYS_ORGANIZATION_ID")),
+        "hexiosec_ready": hexiosec_ready(),
+    }
+
+
+@app.get("/api/integrations/hexiosec/status")
+def hexiosec_status(user: dict[str, Any] = Depends(require_roles("admin"))) -> dict[str, Any]:
+    with db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM projects WHERE hexiosec_org_id IS NOT NULL").fetchone()[0]
+    return {
+        "ready": hexiosec_ready(),
+        "api_base": os.environ.get("HEXIOSEC_API_BASE", "https://asm.hexiosec.com/api"),
+        "auto_bbot": HEXIOSEC_AUTO_BBOT,
+        "imported_projects": count,
+        "last_sync": dict(HEXIOSEC_LAST_SYNC) if HEXIOSEC_LAST_SYNC else None,
+    }
+
+
+@app.post("/api/integrations/hexiosec/sync", status_code=202)
+def hexiosec_sync_endpoint(background: BackgroundTasks, user: dict[str, Any] = Depends(require_roles("admin"))) -> dict[str, Any]:
+    if not hexiosec_ready():
+        raise HTTPException(status_code=400, detail="HEXIOSEC_API_KEY não configurada no servidor.")
+    actor = {"id": user["id"], "tenant_id": user["tenant_id"]}
+    background.add_task(hexiosec_sync, actor)
+    with db() as conn:
+        audit(conn, user, "hexiosec_sync_requested", "integration", "hexiosec")
+    return {"status": "queued", "message": "Sincronização Hexiosec iniciada em segundo plano."}
 
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    # Always revalidate index.html so a new build's ?v= asset links reach the browser
+    # without a manual hard refresh. Static assets stay cacheable (busted by ?v=).
+    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 @app.post("/api/auth/login")
@@ -619,7 +760,7 @@ def approve_project(project_id: str, user: dict[str, Any] = Depends(require_role
         today = date.today()
         if start > today or expiry < today:
             raise HTTPException(status_code=409, detail="Authorization must be current")
-        action_list = ["passive_censys_lookup"]
+        action_list = ["passive_censys_lookup", "passive_bbot_osint"]
         next_scan = datetime.now(timezone.utc) + timedelta(hours=project["scan_interval_hours"])
         conn.execute("UPDATE projects SET scope_state='approved',approved_by=?,allowed_actions_json=?,next_scan_at=?,updated_at=? WHERE id=?",
                      (user["id"], json.dumps(action_list), next_scan.replace(microsecond=0).isoformat(), utc_now(), project_id))
@@ -675,20 +816,30 @@ def update_schedule(project_id: str,payload: ScheduleUpdate,user: dict[str,Any]=
 
 
 @app.post("/api/projects/{project_id}/runs", status_code=202)
-def start_run(project_id: str, background: BackgroundTasks, user: dict[str, Any] = Depends(require_roles("admin", "analyst", "reviewer"))) -> dict[str, Any]:
+def start_run(project_id: str, background: BackgroundTasks, source: Optional[str] = None, user: dict[str, Any] = Depends(require_roles("admin", "analyst", "reviewer"))) -> dict[str, Any]:
+    run_mode = "bbot" if source == "bbot" else None
     with db() as conn:
         project = project_row(conn, user, project_id, allow_client=False)
-        if project["mode"] == "censys":
+        if run_mode == "bbot":
+            if project["mode"] != "censys":
+                raise HTTPException(status_code=409, detail="BBOT passive discovery runs on an approved Censys project")
+            if project["scope_state"] != "approved" or "passive_bbot_osint" not in json_value(project["allowed_actions_json"], []):
+                raise HTTPException(status_code=409, detail="Project scope is not approved for passive BBOT discovery")
+            if date.fromisoformat(project["valid_from"]) > date.today() or date.fromisoformat(project["valid_until"]) < date.today():
+                raise HTTPException(status_code=409, detail="Project authorization is not currently valid")
+            if not bbot_available():
+                raise HTTPException(status_code=503, detail="BBOT nao esta instalado no servico (pip install bbot)")
+        elif project["mode"] == "censys":
             if project["scope_state"] != "approved" or "passive_censys_lookup" not in json_value(project["allowed_actions_json"], []):
                 raise HTTPException(status_code=409, detail="Project scope is not approved for passive Censys collection")
             if date.fromisoformat(project["valid_from"]) > date.today() or date.fromisoformat(project["valid_until"]) < date.today():
                 raise HTTPException(status_code=409, detail="Project authorization is not currently valid")
             if not censys_api_token():
                 raise HTTPException(status_code=503, detail="Censys API token is not configured on this service")
-        scan_id = schedule_scan(conn, project, user["id"])
-        audit(conn, user, "passive_discovery_started", "scan", scan_id, project_id, {"mode": project["mode"]})
+        scan_id = schedule_scan(conn, project, user["id"], mode=run_mode)
+        audit(conn, user, "passive_discovery_started", "scan", scan_id, project_id, {"mode": run_mode or project["mode"]})
     background.add_task(run_scan, scan_id)
-    return {"id": scan_id, "status": "queued", "mode": project["mode"], "message": "Passively querying provider data; no requests are sent to discovered assets."}
+    return {"id": scan_id, "status": "queued", "mode": run_mode or project["mode"], "message": "Coleta passiva enfileirada; nenhum request e enviado aos ativos descobertos."}
 
 
 @app.get("/api/overview")
@@ -928,7 +1079,7 @@ def list_users(user: dict[str, Any] = Depends(require_csrf)) -> list[dict[str, A
 
 @app.post("/api/users",status_code=201)
 def create_user(payload: UserCreate,user: dict[str,Any]=Depends(require_roles("admin")))->dict[str,Any]:
-    if payload.role not in ("analyst","reviewer","client_viewer"): raise HTTPException(status_code=422,detail="Unsupported role")
+    if payload.role not in ("admin","analyst","reviewer","client_viewer"): raise HTTPException(status_code=422,detail="Unsupported role")
     email=payload.email.strip().lower()
     if "@" not in email: raise HTTPException(status_code=422,detail="Enter a valid email")
     if payload.role=="client_viewer" and not payload.project_ids: raise HTTPException(status_code=422,detail="Customer viewers require at least one project")

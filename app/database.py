@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS projects (
   created_by TEXT NOT NULL REFERENCES users(id), approved_by TEXT REFERENCES users(id),
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, scan_interval_hours INTEGER NOT NULL DEFAULT 0,
   next_scan_at TEXT, seeds_json TEXT NOT NULL DEFAULT '[]', exclusions_json TEXT NOT NULL DEFAULT '[]',
-  allowed_actions_json TEXT NOT NULL DEFAULT '[]'
+  allowed_actions_json TEXT NOT NULL DEFAULT '[]', hexiosec_org_id TEXT
 );
 CREATE TABLE IF NOT EXISTS project_members (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -130,9 +130,18 @@ CREATE INDEX IF NOT EXISTS idx_audit_tenant_created ON audit_events(tenant_id,cr
 """
 
 
+def migrate(conn: sqlite3.Connection) -> None:
+    """Additive migrations for databases created before a column existed."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)").fetchall()}
+    if "hexiosec_org_id" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN hexiosec_org_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_hexiosec ON projects(hexiosec_org_id)")
+
+
 def initialize() -> None:
     with db() as conn:
         conn.executescript(SCHEMA)
+        migrate(conn)
         bootstrap_user = os.environ.get("EASM_BOOTSTRAP_EMAIL", "").strip().lower()
         bootstrap_password = os.environ.get("EASM_BOOTSTRAP_PASSWORD", "")
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
